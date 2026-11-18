@@ -49,7 +49,7 @@ router.post('/', verifyToken, async (req, res) => {
 // UPDATE TICKET (Status change, Kanban drag-drop, edit details)
 router.put('/:id', verifyToken, async (req, res) => {
   try {
-    The updatedTicket = await Ticket.findByIdAndUpdate(
+    const updatedTicket = await Ticket.findByIdAndUpdate(
       req.params.id,
       { $set: req.body },
       { new: true }
