@@ -1,5 +1,5 @@
 const router = require('express').Router();
-const Ticket = require('../models/ticket');
+const Ticket = require('../models/Ticket');
 const jwt = require('jsonwebtoken');
 
 // Middleware to verify JWT token
@@ -49,7 +49,7 @@ router.post('/', verifyToken, async (req, res) => {
 // UPDATE TICKET (Status change, Kanban drag-drop, edit details)
 router.put('/:id', verifyToken, async (req, res) => {
   try {
-    const updatedTicket = await Ticket.findByIdAndUpdate(
+    The updatedTicket = await Ticket.findByIdAndUpdate(
       req.params.id,
       { $set: req.body },
       { new: true }
