@@ -1,5 +1,6 @@
 const router = require('express').Router();
-const Ticket = require('../models/ticket');
+const User = require('../models/user');
+const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
 // Middleware to verify JWT token
@@ -16,73 +17,59 @@ const verifyToken = (req, res, next) => {
   }
 };
 
-// GET ALL TICKETS
-router.get('/', verifyToken, async (req, res) => {
+// REGISTER API
+router.post('/register', async (req, res) => {
   try {
-    const tickets = await Ticket.find().populate('assignee', 'name email');
-    res.status(200).json(tickets);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// CREATE TICKET
-router.post('/', verifyToken, async (req, res) => {
-  try {
-    const { title, description, priority, status, assignee, projectId } = req.body;
-    const newTicket = new Ticket({
-      title,
-      description,
-      priority: priority || 'Medium',
-      status: status || 'To Do',
-      assignee,
-      projectId,
-      createdBy: req.user.id
-    });
-    const savedTicket = await newTicket.save();
-    res.status(201).json(savedTicket);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// UPDATE TICKET (Status change, Kanban drag-drop, edit details)
-router.put('/:id', verifyToken, async (req, res) => {
-  try {
-    const updatedTicket = await Ticket.findByIdAndUpdate(
-      req.params.id,
-      { $set: req.body },
-      { new: true }
-    ).populate('assignee', 'name email');
+    const { name, email, password } = req.body;
     
-    if (!updatedTicket) return res.status(404).json({ message: "Ticket not found!" });
-    res.status(200).json(updatedTicket);
+    // Check if user already exists
+    const existingUser = await User.findOne({ email });
+    if (existingUser) return res.status(400).json({ message: "User already exists!" });
+
+    // Hash the password securely
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    // Save new user
+    const newUser = new User({ name, email, password: hashedPassword });
+    const savedUser = await newUser.save();
+    
+    res.status(201).json({ message: "User registered successfully!", userId: savedUser._id });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// DELETE TICKET
-router.delete('/:id', verifyToken, async (req, res) => {
+// LOGIN API
+router.post('/login', async (req, res) => {
   try {
-    const deletedTicket = await Ticket.findByIdAndDelete(req.params.id);
-    if (!deletedTicket) return res.status(404).json({ message: "Ticket not found!" });
-    res.status(200).json({ message: "Ticket deleted successfully!" });
+    const { email, password } = req.body;
+    
+    // Find user by email
+    const user = await User.findOne({ email });
+    if (!user) return res.status(400).json({ message: "User not found!" });
+
+    // Check password match
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) return res.status(400).json({ message: "Invalid credentials!" });
+
+    // Generate JWT token valid for 1 day
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '1d' });
+
+    res.status(200).json({ 
+      token, 
+      user: { id: user._id, name: user.name, email: user.email } 
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ADD COMMENT TO TICKET
-router.post('/:id/comments', verifyToken, async (req, res) => {
+// GET ALL USERS (For Assignee Dropdown)
+router.get('/users', verifyToken, async (req, res) => {
   try {
-    const { text, userName } = req.body;
-    const ticket = await Ticket.findById(req.params.id);
-    if (!ticket) return res.status(404).json({ message: "Ticket not found!" });
-
-    ticket.comments.push({ text, userName: userName || 'Collaborator', createdAt: new Date() });
-    await ticket.save();
-    res.status(200).json(ticket);
+    const users = await User.find({}, 'name email');
+    res.status(200).json(users);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
