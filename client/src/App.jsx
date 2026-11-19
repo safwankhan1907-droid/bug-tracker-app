@@ -11,12 +11,22 @@ export default function App() {
     }
   });
 
+  // View switcher: 'hub' | 'board' | 'profile'
+  const [view, setView] = useState('hub');
+
   // Auth states
   const [isRegister, setIsRegister] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
+
+  // Profile states
+  const [profileName, setProfileName] = useState(user?.name || '');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [profileStatus, setProfileStatus] = useState({ type: '', message: '' });
+  const [savingProfile, setSavingProfile] = useState(false);
 
   // Projects Hub states
   const [projects, setProjects] = useState([]);
@@ -47,6 +57,10 @@ export default function App() {
   const [ticketAssignee, setTicketAssignee] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [priorityFilter, setPriorityFilter] = useState('All');
+
+  useEffect(() => {
+    setProfileName(user?.name || '');
+  }, [user]);
 
   const fetchHealth = async () => {
     try {
@@ -114,6 +128,7 @@ export default function App() {
         localStorage.setItem('user', JSON.stringify(res.data.user));
         setToken(res.data.token);
         setUser(res.data.user);
+        setView('hub');
       }
     } catch (err) {
       setAuthError(err.response?.data?.message || 'Something went wrong');
@@ -126,6 +141,52 @@ export default function App() {
     setToken('');
     setUser(null);
     setActiveProject(null);
+    setView('hub');
+  };
+
+  const handleUpdateProfile = async (e) => {
+    e.preventDefault();
+    setProfileStatus({ type: '', message: '' });
+
+    if (!profileName.trim()) {
+      setProfileStatus({ type: 'error', message: 'Full name cannot be empty.' });
+      return;
+    }
+
+    if (newPassword || confirmPassword) {
+      if (newPassword !== confirmPassword) {
+        setProfileStatus({ type: 'error', message: 'New password and confirm password do not match.' });
+        return;
+      }
+      if (newPassword.length < 4) {
+        setProfileStatus({ type: 'error', message: 'New password must be at least 4 characters.' });
+        return;
+      }
+    }
+
+    setSavingProfile(true);
+    try {
+      const res = await API.put('/auth/profile', {
+        name: profileName,
+        password: newPassword || undefined,
+        confirmPassword: confirmPassword || undefined
+      });
+
+      const updatedUser = res.data.user;
+      setUser(updatedUser);
+      localStorage.setItem('user', JSON.stringify(updatedUser));
+      setNewPassword('');
+      setConfirmPassword('');
+      setProfileStatus({ type: 'success', message: res.data.message || 'Profile updated successfully!' });
+      await fetchUsers();
+    } catch (err) {
+      setProfileStatus({
+        type: 'error',
+        message: err.response?.data?.message || 'Failed to update profile.'
+      });
+    } finally {
+      setSavingProfile(false);
+    }
   };
 
   const handleCreateProject = async (e) => {
@@ -146,7 +207,7 @@ export default function App() {
 
   const handleToggleArchive = async (projectId) => {
     try {
-      await API.patch(`/${projectId}/archive`);
+      await API.patch(`/projects/${projectId}/archive`);
       await fetchProjects(includeArchived);
     } catch (err) {
       console.error(err);
@@ -321,13 +382,15 @@ export default function App() {
           <div>
             <h1 className="text-3xl font-bold tracking-tight">DevFlow Workspace</h1>
             <p className="text-sm text-zinc-400">
-              {activeProject
+              {view === 'profile'
+                ? 'Account & Profile Settings'
+                : view === 'board' && activeProject
                 ? `Projects / ${activeProject.title} (${activeProject.keyCode})`
                 : `Welcome back, ${user?.name || 'Developer'}`}
             </p>
           </div>
-          <div className="flex items-center gap-3">
-            {activeProject && (
+          <div className="flex flex-wrap items-center gap-3">
+            {view === 'board' && activeProject && (
               <>
                 <button
                   onClick={() => {
@@ -340,13 +403,39 @@ export default function App() {
                   + Invite Member
                 </button>
                 <button
-                  onClick={() => setActiveProject(null)}
+                  onClick={() => {
+                    setActiveProject(null);
+                    setView('hub');
+                  }}
                   className="px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm"
                 >
                   ← Projects Hub
                 </button>
               </>
             )}
+
+            {view === 'profile' ? (
+              <button
+                onClick={() => setView(activeProject ? 'board' : 'hub')}
+                className="px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm"
+              >
+                ← Back to Workspace
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  setProfileName(user?.name || '');
+                  setNewPassword('');
+                  setConfirmPassword('');
+                  setProfileStatus({ type: '', message: '' });
+                  setView('profile');
+                }}
+                className="px-4 py-2 rounded-lg bg-zinc-900 border border-zinc-700 hover:border-[#a3e635] text-sm font-medium"
+              >
+                Profile ({user?.name || 'Account'})
+              </button>
+            )}
+
             <button
               onClick={handleLogout}
               className="px-4 py-2 rounded-lg bg-zinc-900 border border-zinc-700 hover:bg-zinc-800 text-sm"
@@ -356,8 +445,99 @@ export default function App() {
           </div>
         </div>
 
-        {/* PROJECTS HUB VIEW */}
-        {!activeProject ? (
+        {/* PROFILE SECTION VIEW */}
+        {view === 'profile' ? (
+          <div className="max-w-xl mx-auto bg-[#111114] border border-zinc-800 rounded-2xl p-7 space-y-5">
+            <div className="border-b border-zinc-800 pb-4">
+              <h2 className="text-2xl font-bold">Profile Settings</h2>
+              <p className="text-sm text-zinc-400 mt-1">
+                Update your display name or set a new password for your account.
+              </p>
+            </div>
+
+            {profileStatus.message && (
+              <div
+                className={`p-3.5 rounded-lg border text-sm ${
+                  profileStatus.type === 'success'
+                    ? 'bg-emerald-950/50 border-emerald-700 text-[#a3e635]'
+                    : 'bg-red-950/60 border-red-800 text-red-300'
+                }`}
+              >
+                {profileStatus.message}
+              </div>
+            )}
+
+            <form onSubmit={handleUpdateProfile} className="space-y-4">
+              <div>
+                <label className="block text-xs uppercase text-zinc-400 mb-1">Email Address</label>
+                <input
+                  type="email"
+                  value={user?.email || ''}
+                  disabled
+                  className="w-full px-3.5 py-2.5 rounded-lg bg-zinc-950 border border-zinc-800 text-zinc-400 text-sm cursor-not-allowed"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs uppercase text-zinc-400 mb-1">Full Name</label>
+                <input
+                  type="text"
+                  value={profileName}
+                  onChange={(e) => setProfileName(e.target.value)}
+                  placeholder="Enter your full name"
+                  className="w-full px-3.5 py-2.5 rounded-lg bg-zinc-900 border border-zinc-700 text-white text-sm"
+                  required
+                />
+              </div>
+
+              <div className="pt-2 border-t border-zinc-800/80 space-y-4">
+                <p className="text-xs uppercase text-zinc-400">
+                  Change Password (leave blank to keep current password)
+                </p>
+
+                <div>
+                  <label className="block text-xs uppercase text-zinc-400 mb-1">New Password</label>
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Enter new password"
+                    className="w-full px-3.5 py-2.5 rounded-lg bg-zinc-900 border border-zinc-700 text-white text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs uppercase text-zinc-400 mb-1">Confirm Password</label>
+                  <input
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Re-enter new password"
+                    className="w-full px-3.5 py-2.5 rounded-lg bg-zinc-900 border border-zinc-700 text-white text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setView(activeProject ? 'board' : 'hub')}
+                  className="px-4 py-2.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingProfile}
+                  className="px-5 py-2.5 rounded-lg bg-[#a3e635] text-black font-semibold text-sm hover:bg-lime-300 disabled:opacity-60"
+                >
+                  {savingProfile ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        ) : view === 'hub' || !activeProject ? (
+          /* PROJECTS HUB VIEW */
           <>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -488,7 +668,10 @@ export default function App() {
                         {project.isArchived ? 'Unarchive' : 'Archive'}
                       </button>
                       <button
-                        onClick={() => setActiveProject(project)}
+                        onClick={() => {
+                          setActiveProject(project);
+                          setView('board');
+                        }}
                         className="text-[#a3e635] font-semibold hover:underline"
                       >
                         Open →
