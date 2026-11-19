@@ -19,6 +19,15 @@ if (!process.env.MONGO_URI) {
     .catch((err) => console.error('Database connection error:', err));
 }
 
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  const isDbConnected = mongoose.connection.readyState === 1;
+  res.status(200).json({
+    status: isDbConnected ? 'Healthy' : 'Degraded',
+    dbConnected: isDbConnected
+  });
+});
+
 // Routes Configuration
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/projects', require('./routes/projects'));
@@ -33,7 +42,7 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-// Global error handler so errors return clean JSON instead of hanging
+// Global error handler
 app.use((err, req, res, next) => {
   console.error('Unhandled server error:', err);
   res.status(err.status || 500).json({ message: err.message || 'Internal Server Error' });
