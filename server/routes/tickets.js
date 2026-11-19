@@ -1,100 +1,111 @@
 const router = require('express').Router();
-const Ticket = require('../models/Ticket');
 const jwt = require('jsonwebtoken');
+const Ticket = require('../models/Ticket');
 
-// Middleware to verify JWT token
+const getJwtSecret = () => process.env.JWT_SECRET || 'devflow_fallback_secret_change_in_prod';
+
 const verifyToken = (req, res, next) => {
   const token = req.header('Authorization');
-  if (!token) return res.status(401).json({ message: "Access Denied! No token provided." });
+  if (!token) return res.status(401).json({ message: 'Access Denied! No token provided.' });
 
   try {
-    const verified = jwt.verify(token, process.env.JWT_SECRET);
+    const cleanToken = token.startsWith('Bearer ') ? token.slice(7) : token;
+    const verified = jwt.verify(cleanToken, getJwtSecret());
     req.user = verified;
     next();
   } catch (err) {
-    res.status(400).json({ message: "Invalid Token!" });
+    res.status(400).json({ message: 'Invalid Token!' });
   }
 };
 
-// CREATE A TICKET FOR A PROJECT
+// GET ALL TICKETS (optionally filtered by ?projectId=...)
+router.get('/', verifyToken, async (req, res) => {
+  try {
+    const query = req.query.projectId ? { projectId: req.query.projectId } : {};
+    const tickets = await Ticket.find(query)
+      .populate('assignee', 'name email')
+      .sort({ createdAt: -1 });
+    res.status(200).json(tickets);
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to fetch tickets', error: err.message });
+  }
+});
+
+// CREATE TICKET
 router.post('/', verifyToken, async (req, res) => {
   try {
-    const { title, description, priority, projectId, assignedTo } = req.body;
-    
+    const { title, description, priority, status, assignee, projectId } = req.body;
+    if (!title || !title.trim()) {
+      return res.status(400).json({ message: 'Ticket title is required.' });
+    }
+
     const newTicket = new Ticket({
-      title,
-      description,
+      title: title.trim(),
+      description: (description || '').trim(),
       priority: priority || 'Medium',
-      project: projectId,
-      assignedTo: assignedTo || null,
+      status: status || 'To Do',
+      assignee: assignee || null,
+      projectId: projectId || null,
       createdBy: req.user.id
     });
 
     const savedTicket = await newTicket.save();
-    res.status(201).json(savedTicket);
+    const populatedTicket = await Ticket.findById(savedTicket._id).populate('assignee', 'name email');
+    res.status(201).json(populatedTicket);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: 'Failed to create ticket', error: err.message });
   }
 });
 
-// GET ALL TICKETS FOR A SPECIFIC PROJECT
-router.get('/project/:projectId', verifyToken, async (req, res) => {
-  try {
-    const tickets = await Ticket.find({ project: req.params.projectId })
-      .populate('assignedTo', 'name email')
-      .populate('createdBy', 'name email');
-    res.status(200).json(tickets);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// UPDATE TICKET STATUS / DETAILS
+// UPDATE TICKET
 router.put('/:id', verifyToken, async (req, res) => {
   try {
     const updatedTicket = await Ticket.findByIdAndUpdate(
       req.params.id,
       { $set: req.body },
       { new: true }
-    ).populate('assignedTo', 'name email').populate('createdBy', 'name email');
+    ).populate('assignee', 'name email');
+
+    if (!updatedTicket) return res.status(404).json({ message: 'Ticket not found!' });
     res.status(200).json(updatedTicket);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: 'Failed to update ticket', error: err.message });
   }
 });
 
-// ADD COMMENT TO A TICKET
-router.post('/:id/comments', verifyToken, async (req, res) => {
-  try {
-    const { text } = req.body;
-    const ticket = await Ticket.findById(req.params.id);
-    if (!ticket) return res.status(404).json({ message: "Ticket not found!" });
-
-    ticket.comments.push({
-      text,
-      author: req.user.id // Token se user ID le li
-    });
-
-    await ticket.save();
-    
-    // Populated ticket wapas bhejenge taaki frontend par details seedha dikhein
-    const updatedTicket = await Ticket.findById(req.params.id)
-      .populate('assignedTo', 'name email')
-      .populate('createdBy', 'name email');
-
-    res.status(200).json(updatedTicket);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// DELETE A TICKET
+// DELETE TICKET
 router.delete('/:id', verifyToken, async (req, res) => {
   try {
-    await Ticket.findByIdAndDelete(req.params.id);
-    res.status(200).json({ message: "Ticket deleted successfully!" });
+    const deletedTicket = await Ticket.findByIdAndDelete(req.params.id);
+    if (!deletedTicket) return res.status(404).json({ message: 'Ticket not found!' });
+    res.status(200).json({ message: 'Ticket deleted successfully!' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: 'Failed to delete ticket', error: err.message });
+  }
+});
+
+// ADD COMMENT TO TICKET
+router.post('/:id/comments', verifyToken, async (req, res) => {
+  try {
+    const { text, userName } = req.body;
+    if (!text || !text.trim()) {
+      return res.status(400).json({ message: 'Comment text is required.' });
+    }
+
+    const ticket = await Ticket.findById(req.params.id);
+    if (!ticket) return res.status(404).json({ message: 'Ticket not found!' });
+
+    ticket.comments.push({
+      text: text.trim(),
+      userName: userName || 'Collaborator',
+      createdAt: new Date()
+    });
+    await ticket.save();
+
+    const populated = await Ticket.findById(ticket._id).populate('assignee', 'name email');
+    res.status(200).json(populated);
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to add comment', error: err.message });
   }
 });
 
